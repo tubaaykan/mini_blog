@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="mb-4">
+  <h2>{{ post.title }}</h2>
+  <div class="text-muted small mb-2">Created: {{ post.created_at }} | Updated: {{ post.updated_at }}</div>
+  {% if post.image_filename %}
+    <img class="full-image mb-3" src="{{ url_for('static', filename='uploads/' ~ post.image_filename) }}" alt="{{ post.image_alt_text or 'Post image' }}">
+  {% endif %}
+  <p>{{ post.content }}</p>
+</article>
+
+<section class="mb-4">
+  <h4>Comments ({{ post.comments|length }})</h4>
+  {% for comment in post.comments %}
+    <div class="border rounded p-2 mb-2">
+      <div class="small text-muted">{{ comment.author }} • {{ comment.created_at }}</div>
+      <div>{{ comment.content }}</div>
+      <form action="{{ url_for('posts.delete_comment', comment_id=comment.id) }}" method="post" class="mt-2">
+        {{ comment_form.csrf_token }}
+        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+      </form>
+    </div>
+  {% else %}
+    <p>No comments yet.</p>
+  {% endfor %}
+</section>
+
+<section>
+  <h5>Add Comment</h5>
+  <form method="post" action="{{ url_for('posts.add_comment', post_id=post.id) }}">
+    {{ comment_form.hidden_tag() }}
+    <div class="mb-2">
+      {{ comment_form.author.label(class="form-label") }}
+      {{ comment_form.author(class="form-control") }}
+    </div>
+    <div class="mb-2">
+      {{ comment_form.content.label(class="form-label") }}
+      {{ comment_form.content(class="form-control", rows=4) }}
+    </div>
+    {{ comment_form.submit(class="btn btn-primary btn-sm") }}
+  </form>
+</section>
+{% endblock %}
