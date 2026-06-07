@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit Post</h2>
+<form method="post" enctype="multipart/form-data">
+  {{ form.hidden_tag() }}
+  <div class="mb-3">
+    {{ form.title.label(class="form-label") }}
+    {{ form.title(class="form-control") }}
+  </div>
+  <div class="mb-3">
+    {{ form.content.label(class="form-label") }}
+    {{ form.content(class="form-control", rows=7) }}
+  </div>
+  <div class="mb-3">
+    {{ form.image.label(class="form-label") }}
+    {{ form.image(class="form-control") }}
+  </div>
+  <div class="mb-3">
+    {{ form.image_alt_text.label(class="form-label") }}
+    {{ form.image_alt_text(class="form-control") }}
+  </div>
+  {{ form.submit(class="btn btn-primary") }}
+</form>
+
+<form action="{{ url_for('posts.delete_post', post_id=post.id) }}" method="post" class="mt-3">
+  {{ form.csrf_token }}
+  <button class="btn btn-danger" type="submit">Delete Post</button>
+</form>
+{% endblock %}

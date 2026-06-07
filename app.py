@@ -1,293 +1,96 @@
-# =========================
-# 📌 GEREKLİ KÜTÜPHANELER
-# =========================
-
-from flask import Flask, render_template, request, redirect
-# Flask → web framework (web sitesi / server oluşturur)
-# render_template → HTML dosyalarını ekrana basar (templates klasöründen)
-# request → HTML formundan gelen verileri alır
-# redirect → kullanıcıyı başka sayfaya yönlendirir
-
-import sqlite3
+import logging
 import os
-import time
-from werkzeug.utils import secure_filename
-# sqlite3 → küçük yerel veritabanı (blog.db dosyası oluşturur ve yönetir)
+
+from dotenv import load_dotenv
+from flask import Flask, render_template
+from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import text
+
+from config import CONFIG_MAP
+from models import db
+from routes import main_bp, posts_bp
 
 
-# =========================
-# 🚀 FLASK UYGULAMASINI BAŞLAT
-# =========================
-
-app = Flask(__name__)
-# Flask uygulamasını oluşturur
+csrf = CSRFProtect()
 
 
-# =========================
-# 🗃️ VERİTABANI OLUŞTURMA
-# =========================
-
-def init_db():
-    # blog.db adlı SQLite veritabanına bağlan
-
-    conn = sqlite3.connect("blog.db")
-    # Eğer blog.db yoksa otomatik oluşturur
-
-    cur = conn.cursor()
-    # SQL komutları yazmak için "imleç" (cursor) oluşturur
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL
+def _setup_logging(app: Flask):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    """)
-    # posts tablosunu oluşturur:
-    # id → otomatik artan benzersiz numara
-    # title → blog başlığı
-    # content → blog içeriği
-    # IF NOT EXISTS → tablo varsa tekrar oluşturmaz
-
-    conn.commit()
-    # yapılan değişiklikleri veritabanına kaydeder
-
-    conn.close()
-    # bağlantıyı kapatır
-
-    # Ensure 'image' column exists (for backward compatibility)
-    conn = sqlite3.connect("blog.db")
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(posts)")
-    cols = [row[1] for row in cur.fetchall()]
-    if 'image' not in cols:
-        try:
-            cur.execute("ALTER TABLE posts ADD COLUMN image TEXT")
-            conn.commit()
-        except Exception:
-            pass
-    conn.close()
+    app.logger.setLevel(logging.INFO)
 
 
-# uygulama açılır açılmaz tablo hazır olsun
-init_db()
+def _configure_engine_pool(app: Flask):
+    uri = app.config["SQLALCHEMY_DATABASE_URI"]
+    if not uri.startswith("sqlite"):
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "pool_size": 5,
+            "max_overflow": 10,
+        }
 
 
-# =========================
-# 🏠 ANA SAYFA (BLOG LİSTELEME)
-# =========================
+def _migrate_legacy_schema(app: Flask):
+    with app.app_context():
+        db.create_all()
+        columns = [
+            row[1]
+            for row in db.session.execute(text("PRAGMA table_info(posts)")).fetchall()
+        ]
+        migrations = {
+            "image_filename": "ALTER TABLE posts ADD COLUMN image_filename VARCHAR(255)",
+            "thumbnail_filename": "ALTER TABLE posts ADD COLUMN thumbnail_filename VARCHAR(255)",
+            "image_alt_text": "ALTER TABLE posts ADD COLUMN image_alt_text VARCHAR(120)",
+            "created_at": "ALTER TABLE posts ADD COLUMN created_at DATETIME",
+            "updated_at": "ALTER TABLE posts ADD COLUMN updated_at DATETIME",
+        }
 
-@app.route("/")
-def index():
-    # "/" → site ana sayfası (localhost:5000)
+        for column, statement in migrations.items():
+            if column not in columns:
+                db.session.execute(text(statement))
 
-    conn = sqlite3.connect("blog.db")
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT id, title, content
-        FROM posts
-        ORDER BY id DESC
-    """)
-    # posts tablosundaki tüm yazıları getirir
-    # ORDER BY id DESC → en yeni post en üstte olur
-
-    posts = cur.fetchall()
-    # tüm sonuçları liste olarak alır
-
-    conn.close()
-
-    return render_template("index.html", posts=posts)
-    # index.html dosyasına posts verisini gönderir
-    # HTML içinde {{ posts }} olarak kullanılır
-
-
-# =========================
-# 📝 YENİ POST SAYFASI
-# =========================
-
-@app.route("/new")
-def new_post():
-    # kullanıcıya form sayfasını gösterir
-
-    return render_template("new.html")
-    # new.html → başlık ve içerik girme formu
+        db.session.execute(
+            text(
+                "UPDATE posts SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), "
+                "updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)"
+            )
+        )
+        db.session.commit()
 
 
-# =========================
-# 📥 FORM VERİSİ ALMA + KAYDETME
-# =========================
+def create_app(config_name: str | None = None):
+    load_dotenv()
 
-@app.route("/create", methods=["POST"])
-def create_post():
-    # sadece form gönderilince çalışır (POST request)
+    app = Flask(__name__)
+    selected = config_name or os.getenv("FLASK_ENV", "development")
+    app.config.from_object(CONFIG_MAP.get(selected, CONFIG_MAP["development"]))
 
-    title = request.form.get("title")
-    content = request.form.get("content")
+    _setup_logging(app)
+    _configure_engine_pool(app)
 
-    # handle uploaded images (multiple)
-    image_files = request.files.getlist('images')
-    image_filenames = []
-    upload_folder = os.path.join(app.root_path, 'static', 'uploads')
-    os.makedirs(upload_folder, exist_ok=True)
-    for img in image_files:
-        if img and img.filename:
-            filename = secure_filename(img.filename)
-            filename = f"{int(time.time())}_{filename}"
-            save_path = os.path.join(upload_folder, filename)
-            try:
-                img.save(save_path)
-                image_filenames.append(filename)
-            except Exception:
-                pass
-    image_filename = '||'.join(image_filenames) if image_filenames else None
+    db.init_app(app)
+    csrf.init_app(app)
 
-    conn = sqlite3.connect("blog.db")
-    cur = conn.cursor()
+    app.register_blueprint(main_bp)
+    app.register_blueprint(posts_bp)
 
-    cur.execute("""
-        INSERT INTO posts (title, content, image)
-        VALUES (?, ?, ?)
-    """, (title, content, image_filename))
+    _migrate_legacy_schema(app)
 
-    conn.commit()
-    conn.close()
+    @app.errorhandler(404)
+    def not_found(error):
+        return render_template("404.html"), 404
 
-    return redirect("/")
-    # işlem bitince kullanıcıyı ana sayfaya gönderir
+    @app.errorhandler(500)
+    def server_error(error):
+        return render_template("500.html"), 500
+
+    return app
 
 
-# =========================
-# 🗑️ POST SİLME
-# =========================
+app = create_app()
 
-@app.route("/delete/<int:post_id>", methods=["POST"])
-def delete_post(post_id):
-    # Veritabanından post'u sil
-    conn = sqlite3.connect("blog.db")
-    cur = conn.cursor()
-
-    cur.execute("""
-        DELETE FROM posts
-        WHERE id = ?
-    """, (post_id,))
-
-    conn.commit()
-    conn.close()
-
-    return redirect("/")
-
-
-@app.route('/edit/<int:post_id>')
-def edit_post(post_id):
-    conn = sqlite3.connect('blog.db')
-    cur = conn.cursor()
-    cur.execute("SELECT id, title, content, image FROM posts WHERE id = ?", (post_id,))
-    post = cur.fetchone()
-    conn.close()
-    if not post:
-        return redirect('/')
-    return render_template('edit.html', post=post)
-
-
-@app.route('/update/<int:post_id>', methods=['POST'])
-def update_post(post_id):
-    title = request.form.get('title')
-    content = request.form.get('content')
-
-    conn = sqlite3.connect('blog.db')
-    cur = conn.cursor()
-    cur.execute("SELECT image FROM posts WHERE id = ?", (post_id,))
-    row = cur.fetchone()
-    old_image = row[0] if row else None
-
-    # handle multiple uploaded images for update (append new images)
-    image_files = request.files.getlist('images')
-    image_filenames = []
-    upload_folder = os.path.join(app.root_path, 'static', 'uploads')
-    os.makedirs(upload_folder, exist_ok=True)
-    for img in image_files:
-        if img and img.filename:
-            filename = secure_filename(img.filename)
-            filename = f"{int(time.time())}_{filename}"
-            save_path = os.path.join(upload_folder, filename)
-            try:
-                img.save(save_path)
-                image_filenames.append(filename)
-            except Exception:
-                pass
-
-    if image_filenames:
-        # append new images to existing ones (do not delete previous uploads)
-        if old_image:
-            try:
-                old_list = old_image.split('||') if old_image else []
-            except Exception:
-                old_list = []
-            merged = old_list + image_filenames
-            image_filename = '||'.join(merged)
-        else:
-            image_filename = '||'.join(image_filenames)
-    else:
-        image_filename = old_image
-
-    cur.execute("""
-        UPDATE posts
-        SET title = ?, content = ?, image = ?
-        WHERE id = ?
-    """, (title, content, image_filename, post_id))
-    conn.commit()
-    conn.close()
-    return redirect('/')
-
-
-@app.route('/post/<int:post_id>')
-def show_post(post_id):
-    conn = sqlite3.connect('blog.db')
-    cur = conn.cursor()
-    cur.execute("SELECT id, title, content, image FROM posts WHERE id = ?", (post_id,))
-    post = cur.fetchone()
-    conn.close()
-    if not post:
-        return redirect('/')
-    return render_template('post.html', post=post)
-
-
-@app.route('/delete_image/<int:post_id>', methods=['POST'])
-def delete_image(post_id):
-    filename = request.form.get('filename')
-    if not filename:
-        return redirect(f"/edit/{post_id}")
-
-    conn = sqlite3.connect('blog.db')
-    cur = conn.cursor()
-    cur.execute("SELECT image FROM posts WHERE id = ?", (post_id,))
-    row = cur.fetchone()
-    if row:
-        imgs = row[0].split('||') if row[0] else []
-        if filename in imgs:
-            imgs = [i for i in imgs if i != filename]
-            # remove file from uploads folder
-            upload_folder = os.path.join(app.root_path, 'static', 'uploads')
-            try:
-                file_path = os.path.join(upload_folder, filename)
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                pass
-            new_value = '||'.join(imgs) if imgs else None
-            cur.execute("UPDATE posts SET image = ? WHERE id = ?", (new_value, post_id))
-            conn.commit()
-    conn.close()
-    return redirect(f"/edit/{post_id}")
-
-
-# =========================
-# ▶️ SERVERI ÇALIŞTIR
-# =========================
 
 if __name__ == "__main__":
-    app.run(debug=True)
-    # debug=True:
-    # - kod değişince otomatik yenilenir
-    # - hata mesajlarını detaylı gösterir
+    app.run(debug=app.config.get("DEBUG", False))

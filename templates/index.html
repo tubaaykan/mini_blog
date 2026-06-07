@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="get" class="row g-2 mb-4">
+  <div class="col-md-5">
+    <input class="form-control" type="search" name="q" value="{{ q }}" placeholder="Search title/content">
+  </div>
+  <div class="col-md-3">
+    <input class="form-control" type="date" name="date" value="{{ date }}">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-primary w-100" type="submit">Filter</button>
+  </div>
+  <div class="col-md-2">
+    <a class="btn btn-secondary w-100" href="{{ url_for('main.index') }}">Reset</a>
+  </div>
+</form>
+
+{% for post in posts %}
+<div class="card mb-3">
+  <div class="card-body">
+    <h5 class="card-title"><a href="{{ url_for('posts.show_post', post_id=post.id) }}">{{ post.title }}</a></h5>
+    <div class="text-muted small mb-2">Created: {{ post.created_at }} | Updated: {{ post.updated_at }}</div>
+    {% if post.thumbnail_filename %}
+      <img class="thumb mb-2" src="{{ url_for('static', filename='uploads/thumbs/' ~ post.thumbnail_filename) }}" alt="{{ post.image_alt_text or 'Post image' }}">
+    {% endif %}
+    <p class="card-text">{{ post.content[:220] }}{% if post.content|length > 220 %}...{% endif %}</p>
+  </div>
+</div>
+{% else %}
+<p>No posts yet.</p>
+{% endfor %}
+
+{% if pagination.pages > 1 %}
+<nav>
+  <ul class="pagination">
+    {% for p in pagination.iter_pages() %}
+      {% if p %}
+        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+          <a class="page-link" href="{{ url_for('main.index', page=p, q=q, date=date) }}">{{ p }}</a>
+        </li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}
+{% endblock %}

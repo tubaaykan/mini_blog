@@ -1,4 +1,9 @@
 Flask>=3.1.2
+Flask-SQLAlchemy
+Flask-WTF
 Werkzeug
 python-dotenv
 Pillow
+python-magic
+pytest
+pytest-flask
