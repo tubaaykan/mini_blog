@@ -1,0 +1,23 @@
+venv/
+__pycache__/
+*.pyc
+instance/
+.env
+*.sqlite3
+*.db
+static/uploads/
+.vscode/
+.idea/
+.DS_Store
+
+# macOS
+*.DS_Store
+
+# Python virtualenv
+env/
+venv/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
